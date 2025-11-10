@@ -8,7 +8,7 @@ import javax.swing.text.JTextComponent;
 
 import org.netbeans.api.editor.mimelookup.MimePath;
 import org.netbeans.api.editor.mimelookup.MimeRegistration;
-
+import org.netbeans.modules.editor.indent.api.Indent;
 import org.netbeans.spi.editor.typinghooks.DeletedTextInterceptor;
 
 public final class SmartBackspaceInterceptor implements DeletedTextInterceptor {
@@ -48,7 +48,6 @@ public final class SmartBackspaceInterceptor implements DeletedTextInterceptor {
         
         JTextComponent comp = ctx.getComponent();
         if (comp == null) {
-            
             return;
         }
 
@@ -76,15 +75,14 @@ public final class SmartBackspaceInterceptor implements DeletedTextInterceptor {
         Element line = root.getElement(lineIdx);
         int lineStart = line.getStartOffset();
         int lineEnd = line.getEndOffset();
-        int logicalLineStart = calculateLogicalLineStart(doc, lineIdx);
 
         String leftOfCaret = safeGet(doc, lineStart, Math.max(0, dot - lineStart));
         String wholeLine = safeGet(doc, lineStart, Math.max(0, lineEnd - lineStart));
 
         boolean onlyWsLeftOfCaret = leftOfCaret.chars().allMatch(ch -> ch == ' ' || ch == '\t');
-
         boolean wholeLineIsWs = wholeLine.trim().isEmpty();
-        if (!onlyWsLeftOfCaret || !wholeLineIsWs) { // added || !wholeLineIsWs
+        
+        if (!onlyWsLeftOfCaret || !wholeLineIsWs) {
             return;
         }
 
@@ -93,14 +91,19 @@ public final class SmartBackspaceInterceptor implements DeletedTextInterceptor {
             return;
         }
 
+        // Calculate logical line start using Indent API
+        int logicalLineStart = calculateLogicalLineStart(doc, lineIdx);
+
+        // If cursor is after logical line start, jump to logical line start
         if (dot > logicalLineStart) {
-            int spacesToRemove = lineEnd - dot;
-            doc.remove(lineStart, spacesToRemove);
+            int spacesToRemove = dot - logicalLineStart;
+            doc.remove(logicalLineStart, spacesToRemove);
             caret.setDot(logicalLineStart);
+            beforeDot = -1;
             return;
         }
 
-        // Compute previous line content end, then delete this whole (whitespace) line (incl. its EOL)
+        // Otherwise, remove the entire line and jump to previous line
         Element prev = root.getElement(lineIdx - 1);
         int prevEnd = Math.max(prev.getEndOffset() - 1, 0); // before its '\n'
 
@@ -135,96 +138,120 @@ public final class SmartBackspaceInterceptor implements DeletedTextInterceptor {
         }
     }
 
+    /**
+     * Calculate the logical line start position using Indent API.
+     * This determines where content SHOULD start based on the document's
+     * indentation rules and context (e.g., inside blocks, after braces, etc.)
+     * 
+     * @param doc The document
+     * @param lineIdx The line index
+     * @return The offset where content should logically start
+     */
     private int calculateLogicalLineStart(Document doc, int lineIdx) throws BadLocationException {
         Element root = doc.getDefaultRootElement();
         Element line = root.getElement(lineIdx);
         int lineStart = line.getStartOffset();
         int lineEnd = line.getEndOffset();
-
-        // Get the actual line content
+        
         String lineText = doc.getText(lineStart, lineEnd - lineStart);
-
-        // Find where non-whitespace content starts on current line
-        int firstNonWs = 0;
-        while (firstNonWs < lineText.length()
-                && (lineText.charAt(firstNonWs) == ' ' || lineText.charAt(firstNonWs) == '\t')) {
-            firstNonWs++;
-        }
-
-        // If current line has content, use its indentation
-        if (firstNonWs < lineText.length() && lineText.charAt(firstNonWs) != '\n' && lineText.charAt(firstNonWs) != '\r') {
+        
+        // If line has actual content (not just whitespace), return where it starts
+        String trimmed = lineText.trim();
+        boolean hasContent = !trimmed.isEmpty() && !trimmed.equals("\n") && !trimmed.equals("\r\n");
+        
+        if (hasContent) {
+            // Line has content - find where non-whitespace starts
+            int firstNonWs = 0;
+            while (firstNonWs < lineText.length() && 
+                   (lineText.charAt(firstNonWs) == ' ' || lineText.charAt(firstNonWs) == '\t')) {
+                firstNonWs++;
+            }
             return lineStart + firstNonWs;
         }
-
-        // Current line is blank - look at previous non-blank lines to infer indentation
+        
+        // Line is blank - use Indent API to calculate proper indentation based on context
+        Indent indent = Indent.get(doc);
+        if (indent == null) {
+            // Fallback: look at previous line
+            return calculateLogicalLineStartFallback(doc, lineIdx);
+        }
+        
+        indent.lock();
+        try {
+            // Save the original line content
+            String originalContent = doc.getText(lineStart, lineEnd - lineStart);
+            int originalLength = originalContent.length();
+            
+            // Reindent the line to calculate proper indentation based on context
+            indent.reindent(lineStart, lineEnd);
+            
+            // Get the new line bounds (they may have shifted due to indentation changes)
+            Element reindentedLine = root.getElement(lineIdx);
+            int newLineStart = reindentedLine.getStartOffset();
+            int newLineEnd = reindentedLine.getEndOffset();
+            
+            // Measure the indentation that was applied
+            String reindentedContent = doc.getText(newLineStart, newLineEnd - newLineStart);
+            int indentLength = 0;
+            while (indentLength < reindentedContent.length() && 
+                   (reindentedContent.charAt(indentLength) == ' ' || 
+                    reindentedContent.charAt(indentLength) == '\t')) {
+                indentLength++;
+            }
+            
+            int logicalStart = newLineStart + indentLength;
+            
+            // Restore original content (undo the reindent)
+            doc.remove(newLineStart, newLineEnd - newLineStart);
+            doc.insertString(newLineStart, originalContent, null);
+            
+            // Return the calculated logical start position
+            // (adjusting for the fact we're back to original line bounds)
+            return lineStart + indentLength;
+            
+        } catch (BadLocationException e) {
+            // If something goes wrong, fall back to manual calculation
+            return calculateLogicalLineStartFallback(doc, lineIdx);
+        } finally {
+            indent.unlock();
+        }
+    }
+    
+    /**
+     * Fallback method for calculating logical line start when Indent API
+     * is unavailable or fails. Uses the previous non-blank line's indentation.
+     */
+    private int calculateLogicalLineStartFallback(Document doc, int lineIdx) throws BadLocationException {
+        Element root = doc.getDefaultRootElement();
+        Element line = root.getElement(lineIdx);
+        int lineStart = line.getStartOffset();
+        
+        // Look at previous non-blank line's indentation
         int searchIdx = lineIdx - 1;
         while (searchIdx >= 0) {
             Element prevLine = root.getElement(searchIdx);
             int prevStart = prevLine.getStartOffset();
             int prevEnd = prevLine.getEndOffset();
             String prevText = doc.getText(prevStart, prevEnd - prevStart);
-
-            // Find first non-whitespace in previous line
+            
             int prevFirstNonWs = 0;
-            while (prevFirstNonWs < prevText.length()
-                    && (prevText.charAt(prevFirstNonWs) == ' ' || prevText.charAt(prevFirstNonWs) == '\t')) {
+            while (prevFirstNonWs < prevText.length() && 
+                   (prevText.charAt(prevFirstNonWs) == ' ' || prevText.charAt(prevFirstNonWs) == '\t')) {
                 prevFirstNonWs++;
             }
-
-            // If we found a line with actual content, use its indentation level
-            if (prevFirstNonWs < prevText.length()
-                    && prevText.charAt(prevFirstNonWs) != '\n'
-                    && prevText.charAt(prevFirstNonWs) != '\r') {
-
-                // Extract the indentation string from the previous line
-                String prevIndent = prevText.substring(0, prevFirstNonWs);
-
-                // Apply that indentation level to current line position
-                return lineStart + prevIndent.length();
+            
+            if (prevFirstNonWs < prevText.length() && 
+                prevText.charAt(prevFirstNonWs) != '\n' && 
+                prevText.charAt(prevFirstNonWs) != '\r') {
+                return lineStart + prevFirstNonWs;
             }
-
+            
             searchIdx--;
         }
-
-        // No previous content found - assume no indentation
+        
         return lineStart;
     }
 
-//    private int calculateLogicalLineStartWithIndentAPI(Document doc, int lineIdx) {
-//        try {
-//            Element root = doc.getDefaultRootElement();
-//            Element line = root.getElement(lineIdx);
-//            int lineStart = line.getStartOffset();
-//
-//            // Use NetBeans Indent API to get proper indentation
-//            org.netbeans.modules.editor.indent.api.Indent indent
-//                    = org.netbeans.modules.editor.indent.api.Indent.get(doc);
-//
-//            if (indent != null) {
-//                indent.lock();
-//                try {
-//                    // Get the indentation for this line
-//                    int indentLevel = indent.indentNewLine(lineStart); //indentNewLine
-//                    return indentLevel;
-//                } finally {
-//                    indent.unlock();
-//                }
-//            }
-//        } catch (BadLocationException e) {
-//            // Fall back to manual calculation
-//        }
-//
-//        // Fallback to the manual method
-//        try {
-//            return calculateLogicalLineStart(doc, lineIdx);
-//        } catch (BadLocationException e) {
-//            Element root = doc.getDefaultRootElement();
-//            Element line = root.getElement(lineIdx);
-//            return line.getStartOffset();
-//        }
-//    }
-
-    // --- Registrations (add as many MIME types as you need) ---
     @MimeRegistration(service = DeletedTextInterceptor.Factory.class, mimeType = "text/x-java")
     public static final class JavaFactory implements DeletedTextInterceptor.Factory {
 

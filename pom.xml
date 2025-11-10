@@ -86,21 +86,21 @@
             <version>${netbeans.version}</version>
         </dependency>
         
-<!--        <dependency>  for indent 
+        <dependency>
             <groupId>org.netbeans.api</groupId>
             <artifactId>org-netbeans-modules-editor-lib</artifactId>
             <version>${netbeans.version}</version>
         </dependency>
-        <dependency>  for indent 
+        <dependency>
             <groupId>org.netbeans.api</groupId>
             <artifactId>org-netbeans-modules-editor-indent</artifactId>
             <version>${netbeans.version}</version>
         </dependency>
-        <dependency>  for indent 
+        <dependency>
             <groupId>org.netbeans.api</groupId>
             <artifactId>org-netbeans-modules-editor-document</artifactId>
             <version>${netbeans.version}</version>
-        </dependency>-->
+        </dependency>
     </dependencies>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
