@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>io.github.s4gh</groupId>
     <artifactId>nb-smart-backspace</artifactId>
-    <version>1.0</version>
+    <version>1.0.1</version>
     <packaging>nbm</packaging>
     <name>NetBeans Plugin with Smart Backspace</name>
     <description>Netbeans IDE plugin wih smart backspace functionality</description>

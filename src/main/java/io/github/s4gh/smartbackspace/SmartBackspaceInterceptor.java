@@ -16,6 +16,9 @@ public final class SmartBackspaceInterceptor implements DeletedTextInterceptor {
     private int beforeDot = -1;
     private boolean hadTextToLeftBefore = false;
     private boolean useIndentApi = true;
+    
+    public SmartBackspaceInterceptor() {
+    }
 
     public SmartBackspaceInterceptor(boolean useIndentApi) {
         this.useIndentApi = useIndentApi;
@@ -268,9 +271,20 @@ public final class SmartBackspaceInterceptor implements DeletedTextInterceptor {
 
         @Override
         public DeletedTextInterceptor createDeletedTextInterceptor(MimePath mimePath) {
-            return new SmartBackspaceInterceptor(true);
+            return new SmartBackspaceInterceptor();
         }
     }
+    
+//    @MimeRegistration(service = DeletedTextInterceptor.Factory.class, mimeType = "")
+//    public static final class DiagnosticFactory implements DeletedTextInterceptor.Factory {
+//
+//        @Override
+//        public DeletedTextInterceptor createDeletedTextInterceptor(MimePath mimePath) {
+//            System.out.println("MimePath: " + mimePath);
+//            System.out.println("MIME Type: " + mimePath.getMimeType(0));
+//            return null; // Return null for diagnostic purposes
+//        }
+//    }
 
     @MimeRegistration(service = DeletedTextInterceptor.Factory.class, mimeType = "text/x-json")
     public static final class JsonFactory implements DeletedTextInterceptor.Factory {
