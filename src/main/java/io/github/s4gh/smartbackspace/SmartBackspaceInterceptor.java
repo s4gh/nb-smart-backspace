@@ -15,6 +15,11 @@ public final class SmartBackspaceInterceptor implements DeletedTextInterceptor {
 
     private int beforeDot = -1;
     private boolean hadTextToLeftBefore = false;
+    private boolean useIndentApi = true;
+
+    public SmartBackspaceInterceptor(boolean useIndentApi) {
+        this.useIndentApi = useIndentApi;
+    }
 
     @Override
     public boolean beforeRemove(DeletedTextInterceptor.Context ctx) throws BadLocationException {
@@ -90,10 +95,16 @@ public final class SmartBackspaceInterceptor implements DeletedTextInterceptor {
         if (lineIdx == 0) {
             return;
         }
+        
+        int logicalLineStart = -1;
 
         // Calculate logical line start using Indent API
-        int logicalLineStart = calculateLogicalLineStart(doc, lineIdx);
-
+        if (useIndentApi) {
+            logicalLineStart = calculateLogicalLineStart(doc, lineIdx);
+        } else {
+            logicalLineStart = calculateLogicalLineStartFallback(doc, lineIdx);
+        }
+        
         // If cursor is after logical line start, jump to logical line start
         if (dot > logicalLineStart) {
             int spacesToRemove = dot - logicalLineStart;
@@ -257,16 +268,25 @@ public final class SmartBackspaceInterceptor implements DeletedTextInterceptor {
 
         @Override
         public DeletedTextInterceptor createDeletedTextInterceptor(MimePath mimePath) {
-            return new SmartBackspaceInterceptor();
+            return new SmartBackspaceInterceptor(true);
         }
     }
 
-    @MimeRegistration(service = DeletedTextInterceptor.Factory.class, mimeType = "text/plain")
-    public static final class PlainFactory implements DeletedTextInterceptor.Factory {
+    @MimeRegistration(service = DeletedTextInterceptor.Factory.class, mimeType = "text/x-json")
+    public static final class JsonFactory implements DeletedTextInterceptor.Factory {
 
         @Override
         public DeletedTextInterceptor createDeletedTextInterceptor(MimePath mimePath) {
-            return new SmartBackspaceInterceptor();
+            return new SmartBackspaceInterceptor(true);
+        }
+    }
+  
+    @MimeRegistration(service = DeletedTextInterceptor.Factory.class, mimeType = "text/xml")
+    public static final class XmlFactory implements DeletedTextInterceptor.Factory {
+
+        @Override
+        public DeletedTextInterceptor createDeletedTextInterceptor(MimePath mimePath) {
+            return new SmartBackspaceInterceptor(false);
         }
     }
 }
