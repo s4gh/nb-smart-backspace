@@ -89,8 +89,8 @@ public final class SmartBackspaceInterceptor implements DeletedTextInterceptor {
 
         boolean onlyWsLeftOfCaret = leftOfCaret.chars().allMatch(ch -> ch == ' ' || ch == '\t');
         boolean wholeLineIsWs = wholeLine.trim().isEmpty();
-        
-        if (!onlyWsLeftOfCaret || !wholeLineIsWs) {
+
+        if (!onlyWsLeftOfCaret) {
             return;
         }
 
@@ -124,7 +124,11 @@ public final class SmartBackspaceInterceptor implements DeletedTextInterceptor {
         // Remove the current line including its line break.
         int removeLen = lineEnd - lineStart;
         doc.remove(lineStart, removeLen);
-
+        
+        if (!wholeLineIsWs) {
+            doc.insertString(prevEnd, wholeLine.trim(), null);
+        }
+        
         // Put caret at the end of previous line (content end).
         caret.setDot(prevEnd);
 
@@ -171,17 +175,6 @@ public final class SmartBackspaceInterceptor implements DeletedTextInterceptor {
         
         // If line has actual content (not just whitespace), return where it starts
         String trimmed = lineText.trim();
-        boolean hasContent = !trimmed.isEmpty() && !trimmed.equals("\n") && !trimmed.equals("\r\n");
-        
-        if (hasContent) {
-            // Line has content - find where non-whitespace starts
-            int firstNonWs = 0;
-            while (firstNonWs < lineText.length() && 
-                   (lineText.charAt(firstNonWs) == ' ' || lineText.charAt(firstNonWs) == '\t')) {
-                firstNonWs++;
-            }
-            return lineStart + firstNonWs;
-        }
         
         // Line is blank - use Indent API to calculate proper indentation based on context
         Indent indent = Indent.get(doc);
@@ -212,8 +205,6 @@ public final class SmartBackspaceInterceptor implements DeletedTextInterceptor {
                     reindentedContent.charAt(indentLength) == '\t')) {
                 indentLength++;
             }
-            
-            int logicalStart = newLineStart + indentLength;
             
             // Restore original content (undo the reindent)
             doc.remove(newLineStart, newLineEnd - newLineStart);
